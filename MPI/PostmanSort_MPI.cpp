@@ -1,126 +1,128 @@
-#include <mpi.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <mpi.h>
 
-void arrange(int, int);
-int original_array[100], sorted_array[100];
-int i, j, temp, max, count, maxdigits = 0, c = 0;
+void arrangeItems(int [], int [], int, int);
+int len;
 
-int main(int argc, char** argv) {
-    // Inicializa MPI
-    MPI_Init(NULL, NULL);
+int main(int argc, char *argv[]){
+    setenv("OMPI_MCA_btl", "^openib", 1);
+    setenv("OMPI_MCA_orte_base_help_aggregate", "0", 1);
+    int rank, size, start_time, end_time, total_time;
+    int i, j, c, t, k, n = 1, max, maxd=0, temp;
 
-    // Obtiene el número total de procesos
-    int world_size;
-    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+    MPI_Init(&argc, &argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-    // Obtiene el rango del proceso actual
-    int world_rank;
-    MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+    // Size of the array to sort...
+    len = 100000;
 
-    int t1, t2, k, t, n = 1;
+    MPI_Bcast(&len, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-    // El proceso 0 recibe los datos del usuario
-    if (world_rank == 0) {
-        printf("Enter size of array :");
-        scanf("%d", &count);
-        printf("Enter elements into array :");
-        for (i = 0; i < count; i++)
-        {
-            scanf("%d", &original_array[i]);
-            sorted_array[i] = original_array[i];            
-        }
+    int *arr = (int *)malloc(len * sizeof(int));
+    int *arr1 = (int *)malloc(len * sizeof(int));
+
+    srand(rank); // Seed rand() with process rank for different random values
+
+    // Automatically fill the array with random values
+    for (i = 0; i < len; i++) {
+        arr[i] = rand() % 100; // Generate a random number between 0 and 99
     }
 
-    // Se envían los datos a todos los procesos
-    MPI_Bcast(&count, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    MPI_Bcast(original_array, count, MPI_INT, 0, MPI_COMM_WORLD);
+    printf("Process %d - Unsorted Array:\n", rank);
+    //for (i = 0; i < len; i++)
+        //printf("%d ", arr[i]);
+    printf("\n");
 
-    // Aquí comienza el algoritmo de ordenamiento Postman
-    // Cada proceso ordena su parte del array en paralelo
+    MPI_Barrier(MPI_COMM_WORLD);
 
-    for (i = 0; i < count; i++)
-    {
-        t = original_array[i];        /*primer elemento en t */
-        while(t > 0)
-        {
+    start_time = MPI_Wtime();
+
+    int local_len = len / size;
+    int *local_arr = (int *)malloc(local_len * sizeof(int));
+
+    MPI_Scatter(arr, local_len, MPI_INT, local_arr, local_len, MPI_INT, 0, MPI_COMM_WORLD);
+
+    // Sort local array
+    for (i = 0; i < local_len; i++) {
+        t = local_arr[i];
+        c = 0;
+        while (t > 0) {
             c++;
-            t = t / 10;        /* Encuentra el dígito más significativo */
+            t = t / 10;
         }
-        if (maxdigits < c) 
-            maxdigits = c;   /* número de dígitos de cada número */
+        if (maxd < c)
+            maxd = c;
         c = 0;
     }
-    while(--maxdigits) 
-        n = n * 10;      
+    while (--maxd)
+        n = n * 10;
 
-    for (i = 0; i < count; i++)
-    {
-        max = original_array[i] / n;        /* DMS - Dividiendo por la base particular */
+    for (i = 0; i < local_len; i++) {
+        max = local_arr[i] / n;
         t = i;
-        for (j = i + 1; j < count;j++)    
-        {
-            if (max > (original_array[j] / n))
-            {
-                max = original_array[j] / n;   /* DMS más grande */
+
+        for (j = i + 1; j < local_len; j++) {
+            if (max > (local_arr[j] / n)) {
+                max = local_arr[j] / n;
                 t = j;
             }
         }
-        temp = sorted_array[t];
-        sorted_array[t] = sorted_array[i];
-        sorted_array[i] = temp;
-        temp = original_array[t];
-        original_array[t] = original_array[i];
-        original_array[i] = temp;
+
+        temp = local_arr[t];
+        local_arr[t] = local_arr[i];
+        local_arr[i] = temp;
     }
-    while (n >= 1)
-    {
-        for (i = 0; i < count;)
-        {
-            t1 = original_array[i] / n;
-            for (j = i + 1; t1 == (original_array[j] / n); j++);
-                arrange(i, j);
+    while (n >= 1) {
+        for (i = 0; i < local_len;) {
+            t = local_arr[i] / n;
+            for (j = i + 1; t == (local_arr[j] / n); j++);
+                arrangeItems(local_arr, local_arr, i, j);
             i = j;
         }
         n = n / 10;
     }
-    if (world_rank == 0) {
-        printf("\nSorted Array (Postman sort) :");    
-        for (i = 0; i < count; i++)
-            printf("%d ", sorted_array[i]);
+
+    MPI_Gather(local_arr, local_len, MPI_INT, arr1, local_len, MPI_INT, 0, MPI_COMM_WORLD);
+
+    if (rank == 0) {
+        // Final sorting
+        arrangeItems(arr, arr1, 0, len);
+
+        printf("Sorted Array:\n");
+        //for (i = 0; i < len; i++)
+            //printf("%d ", arr1[i]);
         printf("\n");
     }
+    end_time = MPI_Wtime();
+    total_time = end_time - start_time; 
+    printf("%f", total_time);
 
-    // Finaliza MPI
+    free(arr);
+    free(arr1);
+    free(local_arr);
+
     MPI_Finalize();
+
+    return 0;
 }
+void arrangeItems(int arr[], int arr1[], int k, int n){
+    int temp = 0;
+    int i = 0;
+    int j = 0;
 
-/* Función para organizar la secuencia que tiene la misma base */
-void arrange(int k, int n) {
-    int *indices = (int *)malloc((n - k) * sizeof(int));
+    for (i = k; i < n - 1 && i < len; i++) {
+        for (j = i + 1; j < n && j < len; j++) {
+            if (arr1[i] > arr1[j]) {
+                temp = arr1[i];
+                arr1[i] = arr1[j];
+                arr1[j] = temp;
 
-    // Almacenar los índices originales antes de ordenar sorted_array
-    for (i = k; i < n; i++) {
-        indices[i - k] = i;
-    }
-
-    // Ordenar los índices basados en el orden de sorted_array
-    for (i = k; i < n - 1; i++) {
-        for (j = i + 1; j < n; j++) {
-            if (sorted_array[indices[i - k]] > sorted_array[indices[j - k]]) {
-                temp = indices[i - k];
-                indices[i - k] = indices[j - k];
-                indices[j - k] = temp;
+                temp = (arr[i] % 10);
+                arr[i] = (arr[j] % 10);
+                arr[j] = temp;
             }
         }
     }
-
-    // Reorganizar original_array basado en los índices ordenados
-    for (i = k; i < n; i++) {
-        temp = original_array[indices[i - k]];
-        original_array[indices[i - k]] = original_array[i];
-        original_array[i] = temp;
-    }
-
-    free(indices);
 }

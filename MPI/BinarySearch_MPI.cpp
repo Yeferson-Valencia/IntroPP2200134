@@ -88,7 +88,7 @@ void binary_search(int list[], int lo, int hi, int key)
         mid = (lo + hi) / 2;
         if (list[mid] == key)
         {
-            printf("Key found\n");
+            printf("Key found at index %d\n", mid);
             return;
         }
         else if (list[mid] < key)
